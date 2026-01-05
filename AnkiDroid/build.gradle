@@ -15,6 +15,11 @@ repositories {
     google()
     mavenCentral()
     maven { url = "https://jitpack.io" }
+    // Onyx SDK repository for Boox e-reader support
+    maven {
+        url = "http://repo.boox.com/repository/maven-public/"
+        allowInsecureProtocol = true
+    }
 }
 
 keeper {
@@ -262,6 +267,10 @@ android {
         resources {
             excludes += ['META-INF/DEPENDENCIES']
         }
+        jniLibs {
+            // Pick first occurrence of libc++_shared.so to avoid duplicate conflicts with Onyx SDK
+            pickFirsts += ['**/libc++_shared.so']
+        }
     }
 }
 
@@ -392,6 +401,31 @@ dependencies {
     implementation libs.nanohttpd
     implementation libs.kotlinx.serialization.json
     implementation libs.seismic
+
+    // AndroidX Graphics for low-latency stylus rendering
+    // Used for GLFrontBufferedRenderer to achieve lag-free drawing
+    implementation 'androidx.graphics:graphics-core:1.0.3'
+
+    // Onyx Pen SDK for Boox e-reader support (matching Notable repo configuration)
+    // https://github.com/Ethran/notable
+    //implementation fileTree(dir: 'libs', include: ['*.aar'])
+    implementation('com.onyx.android.sdk:onyxsdk-device:1.3.1.3') {
+        exclude group: 'com.android.support', module: 'support-compat'
+    }
+
+    implementation('com.onyx.android.sdk:onyxsdk-pen:1.5.0.4') {
+        exclude group: 'com.android.support', module: 'support-compat'
+        exclude group: 'com.android.support', module: 'appcompat-v7'
+        exclude group: "com.onyx.android.sdk", module: "onyxsdk-geometry"
+    }
+
+    implementation('com.onyx.android.sdk:onyxsdk-base:1.8.2.1') {
+        exclude group: 'com.android.support', module: 'support-compat'
+        exclude group: 'com.android.support', module: 'appcompat-v7'
+    }
+
+    // Temporary (?) fix for https://github.com/gaborauth/toolsboox-android/issues/305
+    implementation("org.lsposed.hiddenapibypass:hiddenapibypass:6.1") // required by onyx sdk
 
     debugImplementation libs.androidx.fragment.testing.manifest
 

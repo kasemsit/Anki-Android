@@ -14,6 +14,11 @@ dependencyResolutionManagement {
         google()
         mavenCentral()
         maven(url = "https://jitpack.io")
+        // Onyx SDK repositories for Boox e-reader support
+        maven {
+            url = uri("http://repo.boox.com/repository/maven-public/")
+            isAllowInsecureProtocol = true
+        }
     }
 }
 

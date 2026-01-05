@@ -70,6 +70,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import org.lsposed.hiddenapibypass.HiddenApiBypass
 import timber.log.Timber
 import timber.log.Timber.DebugTree
 import java.util.Locale
@@ -98,6 +99,11 @@ open class AnkiDroidApp :
      */
     @KotlinCleanup("analytics can be moved to attachBaseContext()")
     override fun onCreate() {
+        // Initialize HiddenApiBypass for Onyx SDK TouchHelper to access hidden Android APIs
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            HiddenApiBypass.addHiddenApiExemptions("")
+        }
+
         try {
             Os.setenv("PLATFORM", syncPlatform(), false)
             // enable debug logging of sync actions

@@ -1711,10 +1711,25 @@ open class Reviewer :
         showWhiteboard = state
         MetaDB.storeWhiteboardVisibility(this, parentDid, state)
         if (state) {
-            whiteboard!!.visibility = View.VISIBLE
+            // On Boox devices, only show scratchpad container (not regular whiteboard)
+            if (whiteboard!!.booxSurface != null) {
+                val tags = whiteboard!!.booxSurface?.tag as? Pair<*, *>
+                (tags?.first as? View)?.visibility = View.VISIBLE
+                (tags?.second as? View)?.visibility = View.VISIBLE
+            } else {
+                // Non-Boox devices: show regular whiteboard
+                whiteboard!!.visibility = View.VISIBLE
+            }
             disableDrawerSwipe()
         } else {
-            whiteboard!!.visibility = View.GONE
+            // Hide scratchpad container or regular whiteboard
+            if (whiteboard!!.booxSurface != null) {
+                val tags = whiteboard!!.booxSurface?.tag as? Pair<*, *>
+                (tags?.first as? View)?.visibility = View.GONE
+                (tags?.second as? View)?.visibility = View.GONE
+            } else {
+                whiteboard!!.visibility = View.GONE
+            }
             if (!hasDrawerSwipeConflicts) {
                 enableDrawerSwipe()
             }

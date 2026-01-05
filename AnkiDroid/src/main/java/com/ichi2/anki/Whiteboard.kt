@@ -30,6 +30,8 @@ import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Region
 import android.net.Uri
+import android.os.Build
+import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
@@ -49,10 +51,15 @@ import com.ichi2.compat.CompatHelper
 import com.ichi2.themes.Themes.currentTheme
 import com.ichi2.utils.DisplayUtils.getDisplayDimensions
 import com.mrudultora.colorpicker.ColorPickerPopUp
+import com.onyx.android.sdk.data.note.TouchPoint
+import com.onyx.android.sdk.pen.RawInputCallback
+import com.onyx.android.sdk.pen.TouchHelper
+import com.onyx.android.sdk.pen.data.TouchPointList
 import timber.log.Timber
 import java.io.FileNotFoundException
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
 
 /**
  * Whiteboard allowing the user to draw the card's answer on the touchscreen.
@@ -93,6 +100,9 @@ class Whiteboard(
     private val currentStrokeWidth: Int
         get() = ankiActivity.sharedPrefs().getInt("whiteBoardStrokeWidth", 6)
 
+    // Boox-specific surface for lag-free drawing on e-reader devices
+    internal var booxSurface: WhiteboardSurface? = null
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         canvas.apply {
@@ -101,6 +111,8 @@ class Whiteboard(
             drawPath(path, paint)
         }
     }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean = super.onTouchEvent(event)
 
     /** Handle motion events to draw using the touch screen or to interact with the flashcard behind
      * the whiteboard by using a second finger.
@@ -215,6 +227,7 @@ class Whiteboard(
      * Clear the whiteboard.
      */
     fun clear() {
+        booxSurface?.clear()
         bitmap.eraseColor(0)
         undo.clear()
         invalidate()
@@ -426,6 +439,7 @@ class Whiteboard(
 
     private fun saveStrokeWidth(wbStrokeWidth: Int) {
         paint.strokeWidth = wbStrokeWidth.toFloat()
+        booxSurface?.setStrokeWidth(wbStrokeWidth.toFloat())
         ankiActivity.sharedPrefs().edit {
             putInt("whiteBoardStrokeWidth", wbStrokeWidth)
         }
@@ -437,6 +451,7 @@ class Whiteboard(
         set(color) {
             Timber.d("Setting pen color to %d", color)
             paint.color = color
+            booxSurface?.setColor(color)
             colorPalette.visibility = GONE
             onPaintColorChangeListener?.onPaintColorChange(color)
         }
@@ -593,13 +608,122 @@ class Whiteboard(
                 )
             whiteboard.layoutParams = lp2
             val fl = context.findViewById<FrameLayout>(R.id.whiteboard)
-            fl.addView(whiteboard)
+
+            // On Boox devices, ONLY use WhiteboardSurface scratchpad (no regular whiteboard)
+            if (isOnyxDevice()) {
+                Timber.d("Boox device detected, creating WhiteboardSurface scratchpad")
+
+                val displayMetrics = context.resources.displayMetrics
+                val screenHeight = displayMetrics.heightPixels
+                val scratchpadHeight = (screenHeight * 0.30f).toInt() // 30% of screen
+
+                // Create container for scratchpad with border
+                val scratchpadContainer = android.widget.FrameLayout(context)
+                val containerLp =
+                    FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        scratchpadHeight,
+                    )
+                containerLp.gravity = android.view.Gravity.BOTTOM
+                scratchpadContainer.layoutParams = containerLp
+                scratchpadContainer.visibility = GONE
+
+                // Add background with all borders
+                val borderDrawable = android.graphics.drawable.GradientDrawable()
+                borderDrawable.setColor(android.graphics.Color.parseColor("#F5F5F5")) // Light gray background
+                borderDrawable.setStroke(
+                    (2 * displayMetrics.density).toInt(), // 2dp border all around
+                    android.graphics.Color.parseColor("#666666"), // Dark gray border
+                )
+                scratchpadContainer.background = borderDrawable
+
+                fl.addView(scratchpadContainer)
+
+                // Add a visual separator line at the top for extra emphasis
+                val topBorderLine = android.view.View(context)
+                topBorderLine.setBackgroundColor(android.graphics.Color.parseColor("#333333")) // Very dark gray
+                val topLineLp =
+                    FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        (2 * displayMetrics.density).toInt(), // 2dp thick line
+                    )
+                topLineLp.gravity = android.view.Gravity.BOTTOM
+                topLineLp.bottomMargin = scratchpadHeight
+                topBorderLine.layoutParams = topLineLp
+                topBorderLine.visibility = View.GONE
+                fl.addView(topBorderLine)
+
+                // Add WhiteboardSurface inside container
+                val booxSurface = WhiteboardSurface(context, inverted = currentTheme.isNightMode)
+                val surfaceLp =
+                    FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                    )
+                booxSurface.layoutParams = surfaceLp
+                scratchpadContainer.addView(booxSurface)
+                whiteboard.booxSurface = booxSurface
+
+                // Add clear button as icon with no background or shadow
+                val clearButton = android.widget.ImageButton(context)
+                clearButton.setImageResource(android.R.drawable.ic_menu_rotate)
+                clearButton.setBackgroundColor(android.graphics.Color.TRANSPARENT) // No background
+                clearButton.setColorFilter(android.graphics.Color.parseColor("#666666")) // Dark gray icon
+                clearButton.elevation = 0f // No shadow
+                clearButton.setPadding(
+                    (8 * displayMetrics.density).toInt(),
+                    (8 * displayMetrics.density).toInt(),
+                    (8 * displayMetrics.density).toInt(),
+                    (8 * displayMetrics.density).toInt(),
+                )
+
+                val buttonMargin = (12 * displayMetrics.density).toInt()
+                val buttonSize = (40 * displayMetrics.density).toInt()
+                val clearButtonLp =
+                    FrameLayout.LayoutParams(
+                        buttonSize,
+                        buttonSize,
+                    )
+                clearButtonLp.gravity = android.view.Gravity.TOP or android.view.Gravity.END
+                clearButtonLp.setMargins(0, buttonMargin, buttonMargin, 0)
+                clearButton.layoutParams = clearButtonLp
+
+                // Make button clickable and ensure it receives touch events
+                clearButton.isClickable = true
+                clearButton.isFocusable = true
+
+                clearButton.setOnClickListener {
+                    Timber.d("Clear button clicked")
+                    booxSurface.clear()
+                }
+
+                scratchpadContainer.addView(clearButton)
+
+                // Store references to container and top border line
+                booxSurface.tag = Pair(scratchpadContainer, topBorderLine)
+
+                // Set initial color and stroke width
+                booxSurface.setColor(whiteboard.foregroundColor)
+                booxSurface.setStrokeWidth(whiteboard.currentStrokeWidth.toFloat())
+            } else {
+                // For non-Boox devices, add the regular whiteboard view
+                fl.addView(whiteboard)
+            }
+
             whiteboard.isEnabled = true
             return whiteboard
         }
 
         private val displayDimensions: Point
             get() = getDisplayDimensions(AnkiDroidApp.instance.applicationContext)
+
+        /**
+         * Checks if the current device is an Onyx Boox e-reader.
+         */
+        private fun isOnyxDevice(): Boolean {
+            val manufacturer = Build.MANUFACTURER.lowercase()
+            return manufacturer.contains("onyx") || manufacturer.contains("boox")
+        }
     }
 
     init {
