@@ -1710,12 +1710,31 @@ open class Reviewer :
     private fun setWhiteboardVisibility(state: Boolean) {
         showWhiteboard = state
         MetaDB.storeWhiteboardVisibility(this, parentDid, state)
+
+        val flashcardView = findViewById<View>(R.id.flashcard)
+
         if (state) {
             // On Boox devices, only show scratchpad container (not regular whiteboard)
             if (whiteboard!!.booxSurface != null) {
                 val tags = whiteboard!!.booxSurface?.tag as? Pair<*, *>
-                (tags?.first as? View)?.visibility = View.VISIBLE
+                val scratchpadContainer = tags?.first as? View
+                scratchpadContainer?.visibility = View.VISIBLE
                 (tags?.second as? View)?.visibility = View.VISIBLE
+
+                // Add bottom padding to flashcard only if not already set
+                scratchpadContainer?.let { container ->
+                    val scratchpadHeight = container.layoutParams.height
+                    flashcardView?.let { card ->
+                        if (card.paddingBottom != scratchpadHeight) {
+                            card.setPadding(
+                                card.paddingLeft,
+                                card.paddingTop,
+                                card.paddingRight,
+                                scratchpadHeight,
+                            )
+                        }
+                    }
+                }
             } else {
                 // Non-Boox devices: show regular whiteboard
                 whiteboard!!.visibility = View.VISIBLE
@@ -1727,6 +1746,18 @@ open class Reviewer :
                 val tags = whiteboard!!.booxSurface?.tag as? Pair<*, *>
                 (tags?.first as? View)?.visibility = View.GONE
                 (tags?.second as? View)?.visibility = View.GONE
+
+                // Remove bottom padding only if currently set
+                flashcardView?.let { card ->
+                    if (card.paddingBottom != 0) {
+                        card.setPadding(
+                            card.paddingLeft,
+                            card.paddingTop,
+                            card.paddingRight,
+                            0,
+                        )
+                    }
+                }
             } else {
                 whiteboard!!.visibility = View.GONE
             }
